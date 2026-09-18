@@ -11,7 +11,13 @@ inherit python3native
 JETSON_IO_BASE = "/opt/nvidia/jetson-io"
 
 MAINSUM = "70d8b48d9a120aa75574b9ebdc359f82c2a9ad68e532a7d3dcec18465dfff9b8"
-SRC_URI += "file://0001-Jetson-board.py-fix-block-device-check-for-standard-.patch"
+
+SRC_URI += " \
+    file://0001-Jetson-board.py-fix-block-device-check-for-standard-.patch \
+    file://0002-Jetson-board.py-skip-nvbootctrl-without-AB-rootfs.patch \
+    file://0003-Search-devicetree-paths-for-Yocto-UKI-images.patch \
+    file://0004-Jetson-board.py-search-usr-lib-tegra-dtbs.patch \
+"
 
 do_install() {
     install -d ${D}${JETSON_IO_BASE}/
@@ -23,6 +29,8 @@ FILES:${PN} += "${JETSON_IO_BASE}"
 RDEPENDS:${PN} = "\
     dtc \
     l4t-launcher-extlinux \
+    nvidia-kernel-oot-dtb \
+    nvidia-kernel-oot-dtbo \
     python3 \
     util-linux-lsblk \
     util-linux-mount \

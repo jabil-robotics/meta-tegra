@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Walker <andrew_walker@jabil.com>
+Date: Thu, 17 Sep 2026 13:40:00 -0400
+Subject: [PATCH] Jetson/board.py: skip A/B rootfs logic without nvbootctrl
+
+Jetson-IO always calls nvbootctrl to locate the APP/APP_b rootfs slot.
+Yocto/meta-tegra images use a single root partition with /boot on the
+running rootfs, so nvbootctrl is often absent and the tool fails before
+any pin configuration can run.
+
+Skip redundant-rootfs handling when nvbootctrl is missing or unusable,
+and only mount APP/APP_b when those partitions exist.
+
+Upstream-Status: Pending
+Signed-off-by: Andrew Walker <andrew_walker@jabil.com>
+---
+ opt/nvidia/jetson-io/Jetson/board.py | 25 ++++++++++++++++---------
+ 1 file changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/opt/nvidia/jetson-io/Jetson/board.py b/opt/nvidia/jetson-io/Jetson/board.py
+index 1fe79ee..c4a8d21 100644
+--- a/opt/nvidia/jetson-io/Jetson/board.py
++++ b/opt/nvidia/jetson-io/Jetson/board.py
+@@ -33,6 +33,7 @@ import glob
+ import os
+ import re
+ import shutil
++import subprocess
+ 
+ 
+ def _board_find_overlays(dtbos, hdr_names, hdtbos, hw_addons):
+@@ -218,13 +219,19 @@ class Board(object):
+         fio.is_rw(self.bootdir)
+ 
+         #Finding the active partition in case of redundant rootfs flash.
+-        activepart = syscall.call_out('nvbootctrl -t rootfs get-current-slot')
+-        if activepart[0] == '0':
+-            mountpart = "APP"
+-        elif activepart[0] == '1':
+-            mountpart = "APP_b"
+-        else:
+-            raise RuntimeError("Failed to get active rootfs partition!")
++        mountpart = None
++        if shutil.which('nvbootctrl'):
++            try:
++                activepart = syscall.call_out('nvbootctrl -t rootfs get-current-slot')
++            except subprocess.CalledProcessError:
++                activepart = None
++            if activepart:
++                if activepart[0] == '0':
++                    mountpart = "APP"
++                elif activepart[0] == '1':
++                    mountpart = "APP_b"
++                else:
++                    raise RuntimeError("Failed to get active rootfs partition!")
+ 
+         # When mounting the rootfs via NFS, the root partition is not a
+         # block device. Furthermore, when booting with NFS the partition
+@@ -233,7 +240,8 @@ class Board(object):
+         # not mounted with the active partition, then it is necessary to
+         # find and mount the active partition and copy the generated
+         # files back to this partition.
+-        if not _board_partition_is_root_mountpoint(mountpart):
++        if mountpart and not _board_partition_is_root_mountpoint(mountpart) \
++                and _board_partition_exists(mountpart) > 0:
+             self.appdir = _board_partition_mount(mountpart)
+             dtbdir = os.path.join(self.appdir, 'boot/dtb')
+             fio.is_rw(self.appdir)
+-- 
+2.43.0

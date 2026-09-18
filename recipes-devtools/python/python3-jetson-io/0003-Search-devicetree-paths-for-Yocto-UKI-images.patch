@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Walker <andrew_walker@jabil.com>
+Date: Thu, 17 Sep 2026 14:06:00 -0400
+Subject: [PATCH] Search /boot/devicetree for Yocto UKI images
+
+Jetson-IO only looks under /boot/dtb for *.dtb files. meta-tegra Yocto
+images built with UKI keep device trees in /boot/devicetree as
+*.dtb.signed via nvidia-kernel-oot-dtb, so Board() fails with "No DTB
+found".
+
+Search both locations and accept *.dtb.signed / *.dtbo.signed files.
+
+Upstream-Status: Pending
+Signed-off-by: Andrew Walker <andrew_walker@jabil.com>
+---
+ opt/nvidia/jetson-io/Jetson/board.py | 12 +++++++++---
+ opt/nvidia/jetson-io/Utils/dtc.py    | 21 ++++++++++++++++++---
+ 2 files changed, 27 insertions(+), 6 deletions(-)
+
+diff --git a/opt/nvidia/jetson-io/Jetson/board.py b/opt/nvidia/jetson-io/Jetson/board.py
+index c4a8d21..a1b2c3d 100644
+--- a/opt/nvidia/jetson-io/Jetson/board.py
++++ b/opt/nvidia/jetson-io/Jetson/board.py
+@@ -148,8 +148,8 @@ def _board_partition_is_root_mountpoint(partlabel):
+         return True
+     return False
+ 
+-def _board_get_dtb(compat, model, path):
+-    dtbs = dtc.find_compatible_dtb_files(compat, model, path)
++def _board_get_dtb(compat, model, paths):
++    dtbs = dtc.find_compatible_dtb_files(compat, model, paths)
+ 
+     if dtbs is None:
+         raise RuntimeError("No DTB found for %s!" % model)
+@@ -249,9 +249,15 @@ class Board(object):
+         # Import platform specific data
+         self.compat = dt.read_prop('compatible')
+         self.model = dt.read_prop('model')
+-        self.dtb = _board_get_dtb(self.compat, self.model, dtbdir)
++        dtb_search_paths = [dtbdir, os.path.join(self.bootdir, 'devicetree')]
++        if self.appdir:
++            dtb_search_paths.append(os.path.join(self.appdir, 'boot/devicetree'))
++        self.dtb = _board_get_dtb(self.compat, self.model, dtb_search_paths)
++        dtbo_search_paths = [self.bootdir, os.path.join(self.bootdir, 'devicetree')]
++        if self.appdir:
++            dtbo_search_paths.append(os.path.join(self.appdir, 'boot'))
+         dtbos = dtc.find_compatible_dtbo_files(self.compat.split(),
+-                                               self.bootdir)
++                                               dtbo_search_paths)
+         # Import pinmux
+         self.pinmux = pmx.PinMux()
+ 
+diff --git a/opt/nvidia/jetson-io/Utils/dtc.py b/opt/nvidia/jetson-io/Utils/dtc.py
+index 8e3b1a2..d4e5f6a 100644
+--- a/opt/nvidia/jetson-io/Utils/dtc.py
++++ b/opt/nvidia/jetson-io/Utils/dtc.py
+@@ -101,9 +101,24 @@ def find_nodes_with_prop(dtb, node, prop):
+     return match
+ 
+ 
+-def find_compatible_dtb_files(compat, model, path):
++def _normalize_search_paths(paths):
++    if isinstance(paths, str):
++        return [paths]
++    return list(paths)
++
++
++def _iter_device_tree_files(paths, suffixes):
++    for path in _normalize_search_paths(paths):
++        if not os.path.isdir(path):
++            continue
++        for suffix in suffixes:
++            for dtbf in glob.glob(os.path.join(path, '*.' + suffix)):
++                yield dtbf
++
++
++def find_compatible_dtb_files(compat, model, paths):
+     dtbs = []
+-    for dtb in glob.glob(os.path.join(path, '*.dtb')):
++    for dtb in _iter_device_tree_files(paths, ['dtb', 'dtb.signed']):
+         if compat != get_compatible(dtb):
+             continue
+         if model != get_model(dtb):
+@@ -114,9 +129,9 @@ def find_compatible_dtb_files(compat, model, path):
+     return dtbs
+ 
+ 
+-def find_compatible_dtbo_files(compat, path):
++def find_compatible_dtbo_files(compat, paths):
+     dtbos = []
+-    for dtbo in glob.glob(os.path.join(path, '*.dtbo')):
++    for dtbo in _iter_device_tree_files(paths, ['dtbo', 'dtbo.signed']):
+         c = get_compatible(dtbo)
+         if c is None:
+             continue
+-- 
+2.43.0
